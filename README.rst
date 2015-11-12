@@ -87,6 +87,31 @@ in JSON.  For example,
       }
     }
 
+Event handlers
+--------------
+If you provide a python module with appropriate event handling functions, and specify that module
+when calling the script like ``--events-module=my.events.module``, then event handlers will be
+called when the corresponding event happens.
+
+At the moment, the only available event handler is ``row_added``.
+
+row_added
+^^^^^^^^^
+This will be called when a new row has been selected for adding to the target database.
+It has the following signature::
+
+    def row_added(source_db, source_row, target_db, target_table, prioritized):
+
+``source_db`` and ``target_db`` are ``subsetter.Db`` instances.
+
+``source_row`` is a ``sqlalchemy.engine.RowProxy`` with the values from the row that will be inserted.
+
+``target_table`` is a ``sqlalchemy.Table``.
+
+``prioritized`` is a ``bool`` representing whether of not all child, grandchild, etc rows should be
+included.
+
+
 Installing
 ----------
 

@@ -166,9 +166,22 @@ def _completeness_score(self):
         result += (self.n_rows / (self.n_rows_desired or 1))**0.33
     return result
 
+
+class EventHandler(object):
+    row_added = None
+
+    def __init__(self, module_name=None):
+        if not module_name:
+            return
+
+        handler_module = __import__(module_name)
+        if hasattr(handler_module, 'row_added'):
+            self.row_added = handler_module.row_added
+
+
 class Db(object):
 
-    def __init__(self, sqla_conn, args, schema=None):
+    def __init__(self, sqla_conn, args, event_handler=None, schema=None):
         self.args = args
         self.sqla_conn = sqla_conn
         self.schema = schema
@@ -176,6 +189,7 @@ class Db(object):
         self.meta = sa.MetaData(bind=self.engine) # excised schema=schema to prevent errors
         self.meta.reflect(schema=self.schema)
         self.inspector = Inspector(bind=self.engine)
+        self.event_handler = event_handler or EventHandler()
         self.conn = self.engine.connect()
         self.tables = OrderedDict()
         for tbl in self.meta.sorted_tables:
@@ -279,6 +293,10 @@ class Db(object):
             pks = tuple((source_row[key] for key in target.pk))
             target.pending[pks] = source_row
             target.n_rows += 1
+
+            if self.event_handler.row_added:
+                logging.debug("Calling row_added event handler")
+                self.event_handler.row_added(self, source_row, target_db, target, prioritized)
 
         for child_fk in target.child_fks:
             child = self.tables[(child_fk['constrained_schema'], child_fk['constrained_table'])]
@@ -418,6 +436,9 @@ argparser.add_argument('--schema', help='Non-default schema to include',
                        type=str, action='append', default=[])
 argparser.add_argument('--config', help='Path to configuration .json file',
                        type=argparse.FileType('r'))
+argparser.add_argument('--events-module', dest='event_handler_module',
+                       help='Module that contains event handlers (e.g. handlers or my.module.handlers)',
+                       type=str)
 argparser.add_argument('--exclude-table', '-T', dest='exclude_tables', help='Tables to exclude',
                        type=str, action='append', default=[])
 argparser.add_argument('--full-table', '-F', dest='full_tables', help='Tables to include every row of',
@@ -435,9 +456,10 @@ def generate():
     logging.getLogger().setLevel(args.loglevel)
     schemas = args.schema + [None,]
     args.config = json.load(args.config) if args.config else {}
+    event_handler = EventHandler(args.event_handler_module)
     for schema in schemas:
-        source = Db(args.source, args, schema=schema)
-        target = Db(args.dest, args, schema=schema)
+        source = Db(args.source, args, event_handler=event_handler, schema=schema)
+        target = Db(args.dest, args, event_handler=event_handler, schema=schema)
         if set(source.tables.keys()) != set(target.tables.keys()):
             raise Exception('Source and target databases have different tables')
         source.assign_target(target)
